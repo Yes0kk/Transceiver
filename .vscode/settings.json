@@ -1,0 +1,13 @@
+{
+  "C_Cpp.intelliSenseEngine": "default",
+  "idf.extensionActivationMode": "always",
+  "idf.currentSetup": "C:/Espressif/frameworks/esp-idf-v5.5.4/",
+  "clangd.path": "C:\\Espressif\\tools\\esp-clang\\esp-19.1.2_20250312\\esp-clang\\bin\\clangd.exe",
+  "clangd.arguments": [
+    "--background-index",
+    "--query-driver=**",
+    "--compile-commands-dir=c:\\Development\\esp32\\uart_bridge\\build"
+  ],
+  "idf.flashType": "UART",
+  "idf.portWin": "COM3"
+}

@@ -146,54 +146,7 @@ void EndTransfer(Transceiver *transceiver)
 // Transmit a byte using the CC1101 transceiver
 uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint32_t data)
 {
-    if (transceiver == NULL)
-        return 0;
-
-    CC1101SendStrobe(transceiver, STROBE_SIDLE);
-    CC1101SendStrobe(transceiver, STROBE_SFTX);
-
-    BeginTransfer(transceiver);
-    CC1101TransferByte(transceiver, 0x7F); // Burst TX FIFO
-    CC1101TransferByte(transceiver, (data >> 24) & 0xFF);
-    CC1101TransferByte(transceiver, (data >> 16) & 0xFF);
-    CC1101TransferByte(transceiver, (data >> 8) & 0xFF);
-    CC1101TransferByte(transceiver, data & 0xFF);
-    EndTransfer(transceiver);
-
-    uint8_t txBytes = 0;
-    CC1101ReadRegister(transceiver, TXBYTES, &txBytes);
-    printf("TXBYTES before STX = 0x%02X\n", txBytes);
-
-    CC1101SendStrobe(transceiver, STROBE_STX);
-
-    uint8_t marcstate = 0;
-
-    for (int i = 0; i < 200; i++)
-    {
-        CC1101ReadRegister(transceiver, 0x35, &marcstate);
-        CC1101ReadRegister(transceiver, TXBYTES, &txBytes);
-
-        printf("TX loop %d: MARCSTATE=0x%02X TXBYTES=0x%02X\n",
-               i,
-               marcstate & 0x1F,
-               txBytes);
-
-        if ((marcstate & 0x1F) == 0x01) // IDLE
-            break;
-
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-    }
-
-    CC1101ReadRegister(transceiver, 0x35, &marcstate);
-
-    if ((marcstate & 0x1F) != 0x01)
-    {
-        printf("TX did not return to IDLE\n");
-        CC1101SendStrobe(transceiver, STROBE_SIDLE);
-        CC1101SendStrobe(transceiver, STROBE_SFTX);
-        return 0;
-    }
-
+    
     return 1;
 }
 // Receive a byte using the CC1101 transceiver
@@ -204,46 +157,7 @@ uint32_t CC1101ReceiveByte(Transceiver *transceiver)
 
     uint8_t rxBytes = 0;
 
-    for (int i = 0; i < 200; i++) // 200 ms timeout
-    {
-        CC1101ReadRegister(transceiver, RXBYTES, &rxBytes);
-
-        if (rxBytes & 0x80)
-        {
-            printf("RX FIFO overflow\n");
-            CC1101SendStrobe(transceiver, STROBE_SIDLE);
-            CC1101SendStrobe(transceiver, STROBE_SFRX);
-            return 0;
-        }
-
-        if ((rxBytes & 0x7F) >= 4)
-            break;
-
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-    }
-
-    CC1101ReadRegister(transceiver, RXBYTES, &rxBytes);
-
-    if ((rxBytes & 0x7F) < 4)
-    {
-        printf("Timed out waiting for packet. RXBYTES = 0x%02X\n", rxBytes);
-        return 0;
-    }
-
-    BeginTransfer(transceiver);
-
-    CC1101TransferByte(transceiver, 0xFF); // Burst RX FIFO
-
-    uint32_t data = 0;
-    data |= ((uint32_t)CC1101TransferByte(transceiver, 0x00)) << 24;
-    data |= ((uint32_t)CC1101TransferByte(transceiver, 0x00)) << 16;
-    data |= ((uint32_t)CC1101TransferByte(transceiver, 0x00)) << 8;
-    data |= ((uint32_t)CC1101TransferByte(transceiver, 0x00));
-
-    EndTransfer(transceiver);
-
-    CC1101SendStrobe(transceiver, STROBE_SIDLE);
-    CC1101SendStrobe(transceiver, STROBE_SFRX);
+    
 
     return data;
 }

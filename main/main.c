@@ -8,6 +8,7 @@
 #define transceiverSyncWordQualifier CC1101_SYNC_16_16
 #define transceiverPacketLength 0x04
 #define transceiverPacketType CC1101_PACKET_TYPE_FIXED
+#define transceiverModulationFormat CC1101_MOD_FORMAT_2FSK
 
 #define TRANSMITTER_CSN 22  // GPIO 22
 
@@ -61,8 +62,8 @@ void Setup(void)
 
     CC1101SetFrequency(&transmitter, transceiverFrequency);
     CC1101SetFrequency(&receiver, transceiverFrequency);
-    CC1101SetDataRate(&transmitter, transceiverDataRate);
-    CC1101SetDataRate(&receiver, transceiverDataRate);
+    CC1101SetBitRate(&transmitter, transceiverDataRate);
+    CC1101SetBitRate(&receiver, transceiverDataRate);
     CC1101SetChannelFilterbandwidth(&transmitter, transceiverBandwidth);
     CC1101SetChannelFilterbandwidth(&receiver, transceiverBandwidth);
     CC1101SetSyncWordQualifier(&transmitter, transceiverSyncWordQualifier);
@@ -75,13 +76,12 @@ void Setup(void)
     CC1101SetPacketLength(&receiver, transceiverPacketLength);
     CC1101SetPacketType(&transmitter, transceiverPacketType);
     CC1101SetPacketType(&receiver, transceiverPacketType);
+    CC1101SetModulationFormat(&transmitter, transceiverModulationFormat);
+    CC1101SetModulationFormat(&receiver, transceiverModulationFormat);
+    CC1101SetFrequencyDeviation(&transmitter, 5000);
+    CC1101SetFrequencyDeviation(&receiver, 5000);
 
     CheckValues();
-
-    CC1101SendStrobe(&transmitter, STROBE_SCAL);
-    CC1101SendStrobe(&receiver, STROBE_SCAL);
-    CC1101SetPATable(&transmitter, 0xC0);
-    CC1101SetPATable(&receiver, 0xC0);
 
 
     vTaskDelay(1000 / portTICK_PERIOD_MS); // Wait for 1 second
@@ -89,25 +89,7 @@ void Setup(void)
 
 void CheckValues(void)
 {
-    CC1101WriteRegister(&transmitter, PKTCTRL0, 0x00);
-CC1101WriteRegister(&receiver, PKTCTRL0, 0x00);
 
-CC1101WriteRegister(&transmitter, PKTCTRL1, 0x04);
-CC1101WriteRegister(&receiver, PKTCTRL1, 0x04);
-
-uint8_t v;
-
-CC1101ReadRegister(&transmitter, PKTCTRL0, &v);
-printf("TX PKTCTRL0 = 0x%02X\n", v);
-
-CC1101ReadRegister(&receiver, PKTCTRL0, &v);
-printf("RX PKTCTRL0 = 0x%02X\n", v);
-
-CC1101ReadRegister(&transmitter, PKTCTRL1, &v);
-printf("TX PKTCTRL1 = 0x%02X\n", v);
-
-CC1101ReadRegister(&receiver, PKTCTRL1, &v);
-printf("RX PKTCTRL1 = 0x%02X\n", v);
 }
 
 void PrintRSSI(const char *label)

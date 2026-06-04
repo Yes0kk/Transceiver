@@ -1,13 +1,11 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <limits.h>
 #include <math.h>
 #include "driver/gpio.h"
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-
-
-
 
 // The header for the beginning of a read/write operation to the C1101
 #define CC1101_HEADER(RW, Burst, Address) \
@@ -63,12 +61,21 @@
 // Modem Configuration 1
 #define MDMCFG1 0x13
 
+// Modem Deviation register
+#define DEVIATN 0x15
+
 // Leftover Transmit Bytes register
 #define TXBYTES 0x3A
 // Leftover Receive Bytes register
 #define RXBYTES 0x3B
 
+
 #define CC1101_CRYSTAL_FREQUENCY 26000000 // 26 MHz
+
+#define CC1101_DEVIATION_E_Pos 4
+#define CC1101_DEVIATION_E_Msk (0x07 << CC1101_DEVIATION_E_Pos)
+#define CC1101_DEVIATION_M_Msk 0x07
+
 
 typedef uint8_t CC1101_STATUS_BYTE;
 
@@ -78,15 +85,24 @@ typedef enum {
     CC1101_PACKET_TYPE_INFINITE = 0x02  // Infinite packet length mode
 } CC1101_PACKET_TYPE;
 typedef uint8_t CC1101_PACKET_LENGTH;
-
+typedef uint32_t CC1101_FREQUENCY;
+typedef uint32_t CC1101_BIT_RATE;
+typedef uint32_t CC1101_BANDWIDTH;
+typedef uint16_t CC1101_SYNC_WORD;
 typedef struct {
     gpio_num_t csn_pin;  // !Chip Select pin
     gpio_num_t sck_pin;  // Serial Clock pin
     gpio_num_t mosi_pin; // Input pin 
     gpio_num_t miso_pin; // Output pin
 
-    CC1101_PACKET_TYPE packetType; // Current packet type. Should not be touched by the user
-    CC1101_PACKET_LENGTH packet_length; // Current packet length. Should not be touched by the user
+    //CC1101_FREQUENCY            frequency;          // Current frequency. Should not be touched by the user
+    //CC1101_BIT_RATE             data_rate;          // Current data rate. Should not be touched by the user
+    //CC1101_BANDWIDTH            bandwidth;          // Current bandwidth. Should not be touched by the user
+    //CC1101_SYNC_WORD_QUALIFIER  syncWordQualifier;  // Current sync word qualifier. Should not be touched by the user
+    //CC1101_SYNC_WORD            syncWord;           // Current sync word. Should not be touched by the user
+    //CC1101_PREAMBLE_LENGTH      preambleLength;     // Current preamble length. Should not be touched by the user
+    CC1101_PACKET_LENGTH        packet_length;      // Current packet length. Should not be touched by the user
+    CC1101_PACKET_TYPE          packetType;         // Current packet type. Should not be touched by the user
 } Transceiver;
 
 typedef enum {
@@ -107,6 +123,16 @@ typedef enum {
     C1101_SET_MODE_FSTXON = STROBE_SFSTXON,     // FSTXON mode
 } C1101_SET_MODE;
 
+
+#define CC1101_MOD_FORMAT_Pos 4
+#define CC1101_MOD_FORMAT_Msk (0x07 << CC1101_MOD_FORMAT_Pos)
+typedef enum {
+    CC1101_MOD_FORMAT_2FSK = 0x00, // 2-FSK modulation
+    CC1101_MOD_FORMAT_GFSK = 0x01, // GFSK modulation
+    CC1101_MOD_FORMAT_ASK_OOK = 0x03, // ASK/OOK modulation
+    CC1101_MOD_FORMAT_4FSK = 0x04, // 4-FSK modulation
+    CC1101_MOD_FORMAT_MSK = 0x07 // MSK modulation
+} CC1101_MOD_FORMAT;
 
 // Length of the predefined channel filter bandwidths array
 #define CC1101_CHANNEL_FILTER_LENGTH (sizeof(channelFilterBandwidths) / sizeof(channelFilterBandwidths[0]))
@@ -179,9 +205,9 @@ CC1101_STATUS_BYTE CC1101TransferByte(Transceiver *transceiver, uint8_t byte);
 
 uint32_t CC1101ReceiveByte(Transceiver *transceiver);
 
-uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint32_t byte);
+uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint8_t byte);
 
-CC1101_STATUS_BYTE CC1101SetDataRate(Transceiver *transceiver, uint32_t dataRate);
+CC1101_STATUS_BYTE CC1101SetBitRate(Transceiver *transceiver, uint32_t dataRate);
 
 uint32_t CC1101SetChannelFilterbandwidth(Transceiver *transceiver, uint32_t bandwidth);
 
@@ -197,9 +223,16 @@ CC1101_STATUS_BYTE CC1101SetPacketType(Transceiver *transceiver, CC1101_PACKET_T
 
 CC1101_STATUS_BYTE CC1101FlushFIFO(Transceiver *transceiver);
 
+//Transceiver CreateTransceiver(void);
 
+CC1101_STATUS_BYTE CC1101SetModulationFormat(Transceiver *transceiver, CC1101_MOD_FORMAT modulationFormat);
 
+CC1101_STATUS_BYTE CC1101SetFrequencyDeviation(Transceiver *transceiver, uint32_t frequencyDeviation);
 
-
+// TODO:
+CC1101_STATUS_BYTE CC1101SetCRC(Transceiver *transceiver, bool enable);
+CC1101_STATUS_BYTE CC1101SetCRCAutoFlush(Transceiver *transceiver, bool enable);
+CC1101_STATUS_BYTE CC1101SetAddressFiltering(Transceiver *transceiver, bool enable);
+CC1101_STATUS_BYTE CC1101SetGDO0(Transceiver *transceiver, uint8_t setting);
 
 void CC1101SetPATable(Transceiver *transceiver, uint8_t power);

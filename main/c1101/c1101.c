@@ -144,10 +144,43 @@ void EndTransfer(Transceiver *transceiver)
 }
 
 // Transmit a byte using the CC1101 transceiver
-uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint32_t data)
+uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint8_t byte)
 {
+    if (transceiver == NULL)
+        return 0;
+    CC1101_STATUS_BYTE status = 0;
+
+    BeginTransfer(transceiver);
+
+    CC1101TransferByte(transceiver, STROBE_SIDLE); // Ensure we are in idle mode before writing to the TX FIFO
+
+    delay(1); 
+
+    CC1101TransferByte(transceiver, STROBE_SFTX); 
+
+    delay(1);
+
+    CC1101TransferByte(transceiver, STROBE_SFSTXON);
+
+
+
+    CC1101TransferByte(transceiver, 0x3F); // Send the header for Single byte access to the TX FIFO
+    CC1101TransferByte(transceiver, byte); // Send the byte to the TX FIFO
+    EndTransfer(transceiver);
     
-    return 1;
+    CC1101SendStrobe(transceiver, STROBE_STX); // Send the strobe to transmit the byte
+    
+    // Poll until the byte has been transmitted (TX FIFO is empty)
+    uint8_t txBytes = 0;
+    CC1101ReadRegister(transceiver, TXBYTES, &txBytes);
+    while (txBytes != 0)
+    {
+        CC1101ReadRegister(transceiver, TXBYTES, &txBytes); // Read the number of bytes in the TX FIFO
+    }
+
+    CC1101SendStrobe(transceiver, STROBE_SIDLE); // Return to idle mode after transmission
+
+    return status;
 }
 // Receive a byte using the CC1101 transceiver
 uint32_t CC1101ReceiveByte(Transceiver *transceiver)
@@ -155,9 +188,31 @@ uint32_t CC1101ReceiveByte(Transceiver *transceiver)
     if (transceiver == NULL)
         return 0;
 
-    uint8_t rxBytes = 0;
-
+    CC1101SendStrobe(transceiver, STROBE_SRX); // Send the strobe to enter RX mode
     
+    uint8_t rxBytes = 0;
+    uint32_t timeout = 1000000; // Set a timeout value (in microseconds)
+    while (timeout > 0 && rxBytes == 0) {
+        CC1101ReadRegister(transceiver, RXBYTES, &rxBytes); // Read the number of bytes in the RX FIFO
+        if (rxBytes > 0)
+            break; // If there are bytes in the RX FIFO, break out of the loop
+
+        delay(1); // Wait for 1 microsecond
+        timeout--;
+    }
+    if (timeout == 0)
+    {
+        printf("Timed out waiting for a byte to be received\n");
+        CC1101SendStrobe(transceiver, STROBE_SIDLE); // Return to idle mode after timeout
+        return 0;
+    }
+
+    BeginTransfer(transceiver);
+    CC1101TransferByte(transceiver, 0xBF); // Send the header for Single byte access to the RX FIFO with read bit set
+    uint8_t data = CC1101TransferByte(transceiver, 0x00); // Read the byte from the RX FIFO
+    EndTransfer(transceiver);
+
+    CC1101SendStrobe(transceiver, STROBE_SIDLE); // Return to idle mode after receiving
 
     return data;
 }
@@ -196,11 +251,11 @@ CC1101_STATUS_BYTE CC1101SetFrequency(Transceiver *transceiver, uint32_t frequen
     return status;
 }
 // Set the CC1101 Data Rate registers (in bps)
-CC1101_STATUS_BYTE CC1101SetDataRate(Transceiver *transceiver, uint32_t dataRate)
+CC1101_STATUS_BYTE CC1101SetBitRate(Transceiver *transceiver, uint32_t dataRate)
 {
     if (transceiver == NULL || dataRate <= 600 || dataRate > 406300)
     {
-        printf("(CC1101SetDataRate) Data rate out of range, or invalid transceiver\n");
+        printf("(CC1101SetBitRate) Data rate out of range, or invalid transceiver\n");
         return 0;
     }
 
@@ -405,8 +460,66 @@ CC1101_STATUS_BYTE CC1101FlushFIFO(Transceiver *transceiver)
     return CC1101SendStrobe(transceiver, STROBE_SFRX); // Flush the RX FIFO
 }
 
+//Transceiver CreateTransceiver(void)
 
+// Set the CC1101 Modulation Format (2-FSK, GFSK, ASK/OOK, 4-FSK, MSK)
+CC1101_STATUS_BYTE CC1101SetModulationFormat(Transceiver *transceiver, CC1101_MOD_FORMAT modulationFormat)
+{
+    if (transceiver == NULL || !CC1101IsValidModulationFormat(modulationFormat))
+    {
+        printf("(CC1101SetModulationFormat) Invalid modulation format or transceiver\n");
+        return 0;
+    }
 
+    uint8_t currentMDMCFG2 = 0;
+    CC1101ReadRegister(transceiver, MDMCFG2, &currentMDMCFG2);
+
+    currentMDMCFG2 &= ~CC1101_MOD_FORMAT_Msk; // Clear the modulation format bits
+    currentMDMCFG2 |= (modulationFormat << CC1101_MOD_FORMAT_Pos); // Set the modulation format bits
+
+    return CC1101WriteRegister(transceiver, MDMCFG2, currentMDMCFG2);   
+}
+// Set the CC1101 Frequency Deviation (in Hz)
+CC1101_STATUS_BYTE CC1101SetFrequencyDeviation(Transceiver *transceiver, uint32_t frequencyDeviation)
+{
+    if (transceiver == NULL || frequencyDeviation == 0)
+    {
+        printf("(CC1101SetFrequencyDeviation) Invalid frequency deviation or transceiver\n");
+        return 0;
+    }
+
+    uint32_t closest = UINT32_MAX;
+    uint8_t closest_dev_E = 0;
+    uint8_t closest_dev_M = 0;
+    for (uint8_t dev_E = 0; dev_E < 8; dev_E++)
+    {
+        for (uint8_t dev_M = 0; dev_M < 8; dev_M++)
+        {
+            uint32_t current = ((uint64_t)CC1101_CRYSTAL_FREQUENCY)/((1 << 17)) * (8 + dev_M) * (1 << dev_E);
+            
+            uint32_t error = 0;
+            if (current < frequencyDeviation)
+                error = frequencyDeviation - current;
+            else
+                error = current - frequencyDeviation;
+
+            if (error < closest)
+            {
+                closest = error;
+                closest_dev_E = dev_E;
+                closest_dev_M = dev_M;
+            }
+        }
+    }
+
+    uint8_t currentDEVIATN = 0;
+    CC1101ReadRegister(transceiver, DEVIATN, &currentDEVIATN);
+
+    currentDEVIATN &= ~(CC1101_DEVIATION_E_Msk | CC1101_DEVIATION_M_Msk); // Clear the frequency deviation bits
+    currentDEVIATN |= (closest_dev_E << CC1101_DEVIATION_E_Pos) | closest_dev_M; // Set the frequency deviation bits
+
+    return CC1101WriteRegister(transceiver, DEVIATN, currentDEVIATN);
+}
 
 
 void CC1101SetPATable(Transceiver *transceiver, uint8_t power)
@@ -421,3 +534,24 @@ void CC1101SetPATable(Transceiver *transceiver, uint8_t power)
 }
 
 
+
+
+
+
+// HELPERS
+
+static inline bool CC1101IsValidModulationFormat(CC1101_MOD_FORMAT format)
+{
+    switch (format)
+    {
+        case CC1101_MOD_FORMAT_2FSK:
+        case CC1101_MOD_FORMAT_GFSK:
+        case CC1101_MOD_FORMAT_ASK_OOK:
+        case CC1101_MOD_FORMAT_4FSK:
+        case CC1101_MOD_FORMAT_MSK:
+            return true;
+
+        default:
+            return false;
+    }
+}

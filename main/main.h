@@ -11,4 +11,5 @@ void PrintStatusByte(CC1101_STATUS_BYTE status);
 void Test(void);
 char *ByteToBinary(uint8_t value);
 void CheckValues(void);
+void Setupa(void);
 

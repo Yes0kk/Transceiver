@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include <limits.h>
 #include <math.h>
 #include "driver/gpio.h"
@@ -33,6 +34,8 @@
 #define STROBE_SFRX 0X3A
 // The strobe command to flush the TX FIFO
 #define STROBE_SFTX 0x3B
+// The strobe command for NO OPERATION
+#define STROBE_SNOP 0x3D
 
 // Highest byte location of the Frequency registers 
 #define FREQ0 0x0F
@@ -64,6 +67,12 @@
 // Modem Deviation register
 #define DEVIATN 0x15
 
+// Main Radio Control State Machine Configuration
+#define MCSM0 0x18
+
+// MARCSTATE register
+#define MARCSTATE 0x35
+
 // Leftover Transmit Bytes register
 #define TXBYTES 0x3A
 // Leftover Receive Bytes register
@@ -74,8 +83,21 @@
 
 #define CC1101_DEVIATION_E_Pos 4
 #define CC1101_DEVIATION_E_Msk (0x07 << CC1101_DEVIATION_E_Pos)
-#define CC1101_DEVIATION_M_Msk 0x07
 
+#define CC1101_DEVIATION_M_Pos 0
+#define CC1101_DEVIATION_M_Msk (0x07 << CC1101_DEVIATION_M_Pos)
+
+#define CC1101_CRC_EN_Pos 2
+#define CC1101_CRC_EN_Msk (0x01 << CC1101_CRC_EN_Pos)
+
+#define CC1101_CRC_AUTOFLUSH_Pos 3
+#define CC1101_CRC_AUTOFLUSH_Msk (0x01 << CC1101_CRC_AUTOFLUSH_Pos)
+
+#define CC1101_WHITENING_Pos 4
+#define CC1101_WHITENING_Msk (0x01 << CC1101_WHITENING_Pos)
+
+#define CC1101_AUTOCALIBRATION_Pos 4
+#define CC1101_AUTOCALIBRATION_Msk (0x03 << CC1101_AUTOCALIBRATION_Pos)
 
 typedef uint8_t CC1101_STATUS_BYTE;
 
@@ -123,6 +145,22 @@ typedef enum {
     C1101_SET_MODE_FSTXON = STROBE_SFSTXON,     // FSTXON mode
 } C1101_SET_MODE;
 
+typedef enum{
+    CC1101_AUTOCALIBRATION_NONE = 0x00,  // Never auto-calibrate
+    CC1101_AUTOCALIBRATION_CHANGETORXTX = 0x01, // Calibrate only when changing from idle to RX or TX
+    CC1101_AUTOCALIBRATION_CHANGETOIDLE = 0x02, // Calibrate only when changing from RX or TX to idle
+    CC1101_AUTOCALIBRATION_CHANGETOIDLE_QUARTERLY = 0x03, // Calibrate only when changing from RX or TX to idle every 4th time
+} CC1101_AUTOCALIBRATION;
+
+
+#define CC1101_ADR_CHK_Pos 0
+#define CC1101_ADR_CHK_Msk (0x3 << CC1101_ADR_CHK_Pos)
+typedef enum {
+    CC1101_ADR_CHK_NO = 0x00,
+    CC1101_ADR_CHK_NO_BROADCAST = 0x01,
+    CC1101_ADR_CHK_0_BROADCAST = 0x02,
+    CC1101_ADR_CHK_0_255_BROADCAST = 0X03,
+} CC1101_ADR_CHK;
 
 #define CC1101_MOD_FORMAT_Pos 4
 #define CC1101_MOD_FORMAT_Msk (0x07 << CC1101_MOD_FORMAT_Pos)
@@ -203,9 +241,9 @@ CC1101_STATUS_BYTE CC1101SendStrobe(Transceiver *transceiver, uint8_t strobe);
 
 CC1101_STATUS_BYTE CC1101TransferByte(Transceiver *transceiver, uint8_t byte);
 
-uint32_t CC1101ReceiveByte(Transceiver *transceiver);
+bool CC1101ReceiveByte(Transceiver *transceiver, uint8_t *buffer, uint8_t *length);
 
-uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint8_t byte);
+uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint8_t *buffer, uint8_t length);
 
 CC1101_STATUS_BYTE CC1101SetBitRate(Transceiver *transceiver, uint32_t dataRate);
 
@@ -229,10 +267,24 @@ CC1101_STATUS_BYTE CC1101SetModulationFormat(Transceiver *transceiver, CC1101_MO
 
 CC1101_STATUS_BYTE CC1101SetFrequencyDeviation(Transceiver *transceiver, uint32_t frequencyDeviation);
 
-// TODO:
-CC1101_STATUS_BYTE CC1101SetCRC(Transceiver *transceiver, bool enable);
-CC1101_STATUS_BYTE CC1101SetCRCAutoFlush(Transceiver *transceiver, bool enable);
-CC1101_STATUS_BYTE CC1101SetAddressFiltering(Transceiver *transceiver, bool enable);
+CC1101_STATUS_BYTE CC1101SetEncoding(Transceiver *transceiver, uint8_t encoding);
+
+CC1101_STATUS_BYTE CC1101SetCRC(Transceiver *transceiver, bool state);
+CC1101_STATUS_BYTE CC1101SetCRCAutoFlush(Transceiver *transceiver, bool state);
+CC1101_STATUS_BYTE CC1101SetAddressFiltering(Transceiver *transceiver, CC1101_ADR_CHK state);
 CC1101_STATUS_BYTE CC1101SetGDO0(Transceiver *transceiver, uint8_t setting);
 
 void CC1101SetPATable(Transceiver *transceiver, uint8_t power);
+static inline bool CC1101IsValidModulationFormat(CC1101_MOD_FORMAT format);
+
+CC1101_STATUS_BYTE CC1101FlushTX(Transceiver *transceiver);
+CC1101_STATUS_BYTE CC1101FlushRX(Transceiver *transceiver);
+
+CC1101_STATUS_BYTE CC1101SetWhitening(Transceiver *transceiver, bool state);
+
+CC1101_STATUS_BYTE CC1101SetAutoCalibration(Transceiver *transceiver, CC1101_AUTOCALIBRATION calibration);
+
+CC1101_STATUS_BYTE commonSetup(Transceiver *t);
+
+void EndTransfer(Transceiver *transceiver);
+void BeginTransfer(Transceiver *transceiver);

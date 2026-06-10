@@ -145,46 +145,53 @@ uint8_t CC1101Transmitbyte(Transceiver *transceiver, uint8_t *byte, uint8_t leng
 {
     if (transceiver == NULL)
         return 0;
-
-    CC1101SendStrobe(transceiver, STROBE_SIDLE);
-    CC1101FlushTX(transceiver);
-
     BeginTransfer(transceiver);
     CC1101TransferByte(transceiver, 0x7F);
-    
-    CC1101TransferByte(transceiver, length);
+
+    CC1101TransferByte(transceiver, length+2); // Do +2 to add two blank bytes
     for (int currentByte = 0; currentByte < length; currentByte++)
     {
         CC1101TransferByte(transceiver, byte[currentByte]);
-        printf("Trasnmitted: %u\n", byte[currentByte]);
     }
+    CC1101TransferByte(transceiver, 0x00);
+    CC1101TransferByte(transceiver, 0x00);
     EndTransfer(transceiver);
 
     CC1101SendStrobe(transceiver, STROBE_STX);
 
-    uint8_t bytesLeft = 0;
+    uint8_t marc = 0;
+    int64_t start = esp_timer_get_time();
+
     do
     {
-        CC1101ReadRegister(transceiver, TXBYTES, &bytesLeft);
-    } while (bytesLeft > 0);
+        CC1101ReadRegister(transceiver, MARCSTATE, &marc);
+        marc &= 0x1F;
 
-    printf("\n");
+        if ((esp_timer_get_time() - start) > 100000)
+        {
+            printf("TX timeout, MARCSTATE=0x%02X\n", marc);
+            CC1101SendStrobe(transceiver, STROBE_SIDLE);
+            CC1101FlushTX(transceiver);
+            return 0;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+
+    } while (marc != 0x01); // IDLE
 
     return 1;
 }
 // Receive a byte using the CC1101 transceiver
 bool CC1101ReceiveByte(Transceiver *transceiver, uint8_t *buffer, uint8_t *length)
 {
-    if (transceiver == NULL)
-        return 0;
-
-    vTaskDelay(pdTICKS_TO_MS(10));
+    if (transceiver == NULL || buffer == NULL || length == NULL)
+        return false;
 
     uint8_t rxBytes = 0;
-    CC1101ReadRegister(transceiver, RXBYTES, &rxBytes);
-    int timeout = 1000; // 1000 ms
+    int64_t start = esp_timer_get_time();
 
-    while (timeout > 0)
+    // 1. Wait until at least the variable-length byte is available
+    while ((esp_timer_get_time() - start) < 10000)
     {
         CC1101ReadRegister(transceiver, RXBYTES, &rxBytes);
 
@@ -193,34 +200,77 @@ bool CC1101ReceiveByte(Transceiver *transceiver, uint8_t *buffer, uint8_t *lengt
             printf("RX FIFO overflow\n");
             CC1101SendStrobe(transceiver, STROBE_SIDLE);
             CC1101FlushRX(transceiver);
-            return 0;
+            return false;
         }
 
-        if ((rxBytes & 0x7F) > 0)
+        if ((rxBytes & 0x7F) >= 1)
             break;
 
         vTaskDelay(pdMS_TO_TICKS(1));
-        timeout--;
     }
-    if (timeout == 0)
-    {
-        printf("Timed out waiting for a byte to be received\n");
-        return 0;
-    }
-    printf("Timeout: %u\n", timeout);
 
+    if ((rxBytes & 0x7F) < 1)
+        return false;
+
+    // 2. Read the length byte
     BeginTransfer(transceiver);
-    CC1101TransferByte(transceiver, 0xFF);
-    (*length) = CC1101TransferByte(transceiver, 0);
-    for (uint8_t bytes = 0; bytes < (*length); bytes++)
-    {
-        uint8_t b = CC1101TransferByte(transceiver, 0);
-        printf("[%u] - 0x%02X\n", bytes, b);
-        buffer[bytes] = b;
-    }
+    CC1101TransferByte(transceiver, 0xFF);   // RX FIFO burst read
+    *length = CC1101TransferByte(transceiver, 0x00);
     EndTransfer(transceiver);
 
-    printf("length: %u\n", *length);
+    // 3. Validate length
+    if (*length == 0 || *length > 64)
+    {
+        printf("Invalid packet length: %u\n", *length);
+        CC1101SendStrobe(transceiver, STROBE_SIDLE);
+        CC1101FlushRX(transceiver);
+        return false;
+    }
+
+    // 4. Wait until the full payload is in RX FIFO
+    start = esp_timer_get_time();
+
+    while ((esp_timer_get_time() - start) < 10000)
+    {
+        CC1101ReadRegister(transceiver, RXBYTES, &rxBytes);
+
+        if (rxBytes & 0x80)
+        {
+            printf("RX FIFO overflow\n");
+            CC1101SendStrobe(transceiver, STROBE_SIDLE);
+            CC1101FlushRX(transceiver);
+            return false;
+        }
+
+        if ((rxBytes & 0x7F) >= *length)
+            break;
+
+        vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    if ((rxBytes & 0x7F) < *length)
+    {
+        printf("RX timeout. Have %u bytes, need %u bytes\n", rxBytes & 0x7F, *length);
+        CC1101SendStrobe(transceiver, STROBE_SIDLE);
+        CC1101FlushRX(transceiver);
+        return false;
+    }
+
+    // 5. Read exactly payload length bytes
+    BeginTransfer(transceiver);
+    CC1101TransferByte(transceiver, 0xFF);   // RX FIFO burst read
+
+    for (uint8_t i = 0; i < *length; i++)
+        buffer[i] = CC1101TransferByte(transceiver, 0x00);
+
+    EndTransfer(transceiver);
+
+    // Optional null terminator for printf("%s")
+    buffer[*length] = '\0';
+
+    CC1101SendStrobe(transceiver, STROBE_SIDLE);
+    CC1101FlushRX(transceiver);
+    CC1101SendStrobe(transceiver, STROBE_SRX);
 
     return true;
 }
@@ -587,7 +637,7 @@ CC1101_STATUS_BYTE CC1101SetEncoding(Transceiver *transceiver, uint8_t encoding)
     return CC1101WriteRegister(transceiver, MDMCFG2, reg);
 }
 
-CC1101_STATUS_BYTE commonSetup(Transceiver *transceiver)
+CC1101_STATUS_BYTE CC1101CommonSetup(Transceiver *transceiver)
 {
     CC1101_STATUS_BYTE status = 0;
 
@@ -596,22 +646,22 @@ CC1101_STATUS_BYTE commonSetup(Transceiver *transceiver)
     status = CC1101SetFrequency(transceiver, 433456789);
     // printf("CC1101 Frequency: %u\n", status);
 
-    status = CC1101SetBitRate(transceiver, 5000);
+    status = CC1101SetBitRate(transceiver, 100000);
     // printf("CC1101 BitRate: %u\n", status);
 
-    status = CC1101SetChannelFilterbandwidth(transceiver, (uint32_t)100000);
+    status = CC1101SetChannelFilterbandwidth(transceiver, 250000);
     // printf("CC1101 Bandwidth: %u\n", status);
 
-    status = CC1101SetFrequencyDeviation(transceiver, 10000);
+    status = CC1101SetFrequencyDeviation(transceiver, 50000);
     // printf("CC1101 FrequencyDeviation: %u\n", status);
 
     status = CC1101SetPacketType(transceiver, CC1101_PACKET_TYPE_VARIABLE);
     // printf("CC1101 PacketType: %u\n", status);
 
-    status = CC1101SetPacketLength(transceiver, 0xFF); // Maximum packet length
+    status = CC1101SetPacketLength(transceiver, 0x40); // Maximum packet length
     // printf("CC1101 PacketLength: %u\n", status);
 
-    status = CC1101SetMinimumPreamble(transceiver, CC1101_PREAMBLE_8_BYTES);
+    status = CC1101SetMinimumPreamble(transceiver, CC1101_PREAMBLE_2_BYTES);
     // printf("CC1101 PreambleLength: %u\n", status);
 
     status = CC1101SetModulationFormat(transceiver, CC1101_MOD_FORMAT_2FSK);
@@ -624,6 +674,17 @@ CC1101_STATUS_BYTE commonSetup(Transceiver *transceiver)
     // printf("CC1101 SyncWord: %u\n", status);
 
     status = CC1101SetWhitening(transceiver, 0);
+
+    status = CC1101SetAddressFiltering(transceiver, 0);
+
+    status = CC1101SetCRC(transceiver, 1);
+    CC1101SetCRCAutoFlush(transceiver, 0);
+
+    CC1101StatusBytes(transceiver, 0);
+
+    CC1101StatusBytes(transceiver, 0);
+    CC1101RXOff(transceiver, CC1101_PACKET_RECEIVED_IDLE);
+    CC1101TXOff(transceiver, CC1101_PACKET_SENT_IDLE);
 
     status = CC1101SetAutoCalibration(transceiver, CC1101_AUTOCALIBRATION_CHANGETORXTX);
 
@@ -693,9 +754,55 @@ CC1101_STATUS_BYTE CC1101SetAutoCalibration(Transceiver *transceiver, CC1101_AUT
     regMCSM0 &= ~(CC1101_AUTOCALIBRATION_Msk);
     regMCSM0 |= calibration << CC1101_AUTOCALIBRATION_Pos;
 
-    printf("MCSM0: %u\n", regMCSM0);
-
     return CC1101WriteRegister(transceiver, MCSM0, regMCSM0);
+}
+
+CC1101_STATUS_BYTE CC1101RXOff(Transceiver *transceiver, CC1101_PACKET_RECEIVED type)
+{
+    if (transceiver == NULL)
+    {
+        printf("(CC1101RXOff) Invalid transceiver.");
+    }
+
+    uint8_t regMCSM1 = 0;
+    CC1101ReadRegister(transceiver, MCSM1, &regMCSM1);
+
+    regMCSM1 &= ~(CC1101_RXOFF_MODE_Msk);
+    regMCSM1 |= type << CC1101_RXOFF_MODE_Pos;
+
+    return CC1101WriteRegister(transceiver, MCSM1, regMCSM1);
+}
+
+CC1101_STATUS_BYTE CC1101TXOff(Transceiver * transceiver, CC1101_PACKET_SENT type)
+{
+    if (transceiver == NULL)
+    {
+        printf("(CC1101RXOff) Invalid transceiver.");
+    }
+
+    uint8_t regMCSM1 = 0;
+    CC1101ReadRegister(transceiver, MCSM1, &regMCSM1);
+
+    regMCSM1 &= ~(CC1101_TXOFF_MODE_Msk);
+    regMCSM1 |= type << CC1101_TXOFF_MODE_Pos;
+
+    return CC1101WriteRegister(transceiver, MCSM1, regMCSM1);
+}
+
+CC1101_STATUS_BYTE CC1101StatusBytes(Transceiver *transceiver, bool state)
+{
+    if (transceiver == NULL)
+    {
+        printf("(CC1101RXOff) Invalid transceiver.");
+    }
+
+    uint8_t regPKTCTRL1 = 0;
+    CC1101ReadRegister(transceiver, PKTCTRL1, &regPKTCTRL1);
+
+    regPKTCTRL1 &= ~(CC1101_APPEND_STATUS_Msk);
+    regPKTCTRL1 |= state << CC1101_APPEND_STATUS_Pos;
+
+    return CC1101WriteRegister(transceiver, PKTCTRL1, regPKTCTRL1);
 }
 
 // HELPERS

@@ -7,6 +7,7 @@
 #include "esp_rom_sys.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_timer.h"
 
 // The header for the beginning of a read/write operation to the C1101
 #define CC1101_HEADER(RW, Burst, Address) \
@@ -67,7 +68,9 @@
 // Modem Deviation register
 #define DEVIATN 0x15
 
-// Main Radio Control State Machine Configuration
+// Main Radio Control State Machine Configuration 2
+#define MCSM1 0x17
+// Main Radio Control State Machine Configuration 1
 #define MCSM0 0x18
 
 // MARCSTATE register
@@ -98,6 +101,9 @@
 
 #define CC1101_AUTOCALIBRATION_Pos 4
 #define CC1101_AUTOCALIBRATION_Msk (0x03 << CC1101_AUTOCALIBRATION_Pos)
+
+#define CC1101_APPEND_STATUS_Pos 2
+#define CC1101_APPEND_STATUS_Msk (0x01 << CC1101_APPEND_STATUS_Pos)
 
 typedef uint8_t CC1101_STATUS_BYTE;
 
@@ -211,6 +217,23 @@ typedef enum {
     CC1101_SYNC_CS_30_32 = 0x07, // 30/32 sync word qualifier, carrier sense above threshold
 } CC1101_SYNC_WORD_QUALIFIER;
 
+#define CC1101_RXOFF_MODE_Pos 2
+#define CC1101_RXOFF_MODE_Msk (0x03 << CC1101_RXOFF_MODE_Pos)
+typedef enum {
+    CC1101_PACKET_RECEIVED_IDLE     = 0x00,
+    CC1101_PACKET_RECEIVED_FSTXON   = 0x01,
+    CC1101_PACKET_RECEIVED_TX       = 0x02,
+    CC1101_PACKET_RECEIVED_STAYRX   = 0x03,
+} CC1101_PACKET_RECEIVED;
+
+#define CC1101_TXOFF_MODE_Pos 0
+#define CC1101_TXOFF_MODE_Msk (0x03 << CC1101_TXOFF_MODE_Pos)
+typedef enum {
+    CC1101_PACKET_SENT_IDLE     = 0x00,
+    CC1101_PACKET_SENT_FSTXON   = 0x01,
+    CC1101_PACKET_SENT_STAYTX   = 0x02,
+    CC1101_PACKET_SENT_RX       = 0x03,
+} CC1101_PACKET_SENT;
 
 // Preamble Length Position
 #define CC1101_PREAMBLE_LENGTH_POSITION 4
@@ -226,6 +249,7 @@ typedef enum {
     CC1101_PREAMBLE_16_BYTES = 0x06, // 16 bytes
     CC1101_PREAMBLE_24_BYTES = 0x07  // 24 bytes
 } CC1101_PREAMBLE_LENGTH;
+
 
 CC1101_STATUS_BYTE CC1101WriteRegister(Transceiver *transceiver, uint8_t address, uint8_t value);
 
@@ -284,7 +308,12 @@ CC1101_STATUS_BYTE CC1101SetWhitening(Transceiver *transceiver, bool state);
 
 CC1101_STATUS_BYTE CC1101SetAutoCalibration(Transceiver *transceiver, CC1101_AUTOCALIBRATION calibration);
 
-CC1101_STATUS_BYTE commonSetup(Transceiver *t);
+CC1101_STATUS_BYTE CC1101CommonSetup(Transceiver *t);
+
+CC1101_STATUS_BYTE CC1101RXOff(Transceiver *transceiver, CC1101_PACKET_RECEIVED type);
+CC1101_STATUS_BYTE CC1101TXOff(Transceiver *transceiver, CC1101_PACKET_SENT type);
+
+CC1101_STATUS_BYTE CC1101StatusBytes(Transceiver *transceiver, bool state);
 
 void EndTransfer(Transceiver *transceiver);
 void BeginTransfer(Transceiver *transceiver);

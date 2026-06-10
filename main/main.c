@@ -54,56 +54,46 @@ void app_main(void)
     CC1101Reset(&transmitter);
     CC1101Reset(&receiver);
 
-    Setup();
-
-    Test();
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
+    DataLoop();
 }
-
-void Test(void)
-{
-    uint8_t txData[] = {0x12, 0x34, 0x56, 0x78, 0x9A, 0xAB, 0xCD, 0xEF};
-
-    uint8_t packet[20] = {  };
-    uint8_t size = 0;
-
-    CC1101SendStrobe(&receiver, STROBE_SRX);
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    CC1101Transmitbyte(&transmitter, txData, sizeof(txData));
-
-    if (CC1101ReceiveByte(&receiver, packet, &size))
-    {
-        for (uint8_t i = 0; i < (sizeof(packet) / sizeof(packet[0])); i++)
-        {
-            printf("Received: %u\n", packet[i]);
-        }
-    }
-
-    printf("BackupReceived: %s\n", packet);
-}
-
-
 
 
 void DataLoop(void)
 {
+    Setup();
+    CC1101SendStrobe(&receiver, STROBE_SRX);
+    CC1101RXOff(&receiver, CC1101_PACKET_RECEIVED_STAYRX);
+
+
+    uint16_t count = 1;
     while (1)
     {
-        vTaskDelay(10000 / portTICK_PERIOD_MS);
-        printf("\nRestarting...\n\n");
+        uint8_t txData[] = "I dont like tomatoes!";
 
-        Setup();
-        Test();
+        uint8_t packet[65] = { 0 };
+        uint8_t size = 0;
+
+        CC1101Transmitbyte(&transmitter, txData, sizeof(txData));
+
+        if (CC1101ReceiveByte(&receiver, packet, &size))
+        {
+            printf("Receive packet: %s\n", packet);
+        }
+        
+        printf("Count: %u\n", count);
+
+        count++;
+
     }
 }
 
+
 void Setup(void)
 {
-    commonSetup(&receiver);
-    commonSetup(&transmitter);
+    CC1101CommonSetup(&receiver);
+    CC1101CommonSetup(&transmitter);
+
+    CC1101TXOff(&transmitter, CC1101_PACKET_SENT_IDLE);
 }
 
 char *ByteToBinary(uint8_t value)

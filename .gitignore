@@ -79,5 +79,6 @@ Desktop.ini
 
 # others
 .clangd
-.vscode
-.devcontainer
+.vscode/
+.devcontainer/
+.code-workspace

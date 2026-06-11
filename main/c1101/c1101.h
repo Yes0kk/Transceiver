@@ -308,10 +308,10 @@ CC1101_STATUS_BYTE CC1101SetWhitening(Transceiver *transceiver, bool state);
 
 CC1101_STATUS_BYTE CC1101SetAutoCalibration(Transceiver *transceiver, CC1101_AUTOCALIBRATION calibration);
 
-CC1101_STATUS_BYTE CC1101CommonSetup(Transceiver *t);
+CC1101_STATUS_BYTE CC1101Init(Transceiver *t);
 
-CC1101_STATUS_BYTE CC1101RXOff(Transceiver *transceiver, CC1101_PACKET_RECEIVED type);
-CC1101_STATUS_BYTE CC1101TXOff(Transceiver *transceiver, CC1101_PACKET_SENT type);
+CC1101_STATUS_BYTE CC1101SetAfterPacketReceivedMode(Transceiver *transceiver, CC1101_PACKET_RECEIVED type);
+CC1101_STATUS_BYTE CC1101SetAfterPacketSentMode(Transceiver *transceiver, CC1101_PACKET_SENT type);
 
 CC1101_STATUS_BYTE CC1101StatusBytes(Transceiver *transceiver, bool state);
 

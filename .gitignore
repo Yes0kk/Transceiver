@@ -82,3 +82,20 @@ Desktop.ini
 .vscode/
 .devcontainer/
 .code-workspace
+
+
+# ignore everything
+*
+
+# but do not ignore folders themselves
+!*/
+
+# keep main folder
+!main/**
+!main/
+
+# keep root CMakeLists.txt
+!CMakeLists.txt
+
+# keep .gitignore itself
+!.gitignore
